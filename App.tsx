@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { lookupTerm, playTTS, generateStoryFromWords, chatAboutTerm } from './services/geminiService';
 import { WordEntry, ViewMode, ChatMessage, StoryResponse, TranslatedTerm, Conjugation, StaticVerb } from './types';
@@ -6,7 +5,7 @@ import { COMMON_VERBS } from './data/verbList';
 import { 
   SearchIcon, BookIcon, BrainIcon, VolumeIcon, 
   SaveIcon, SparklesIcon, ArrowRightIcon, RefreshIcon, 
-  MessageCircleIcon, XIcon, SendIcon 
+  MessageCircleIcon, XIcon, SendIcon, ClockIcon, TrashIcon
 } from './components/Icons';
 
 // --- Subcomponents ---
@@ -159,6 +158,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [currentEntry, setCurrentEntry] = useState<WordEntry | null>(null);
   const [notebook, setNotebook] = useState<WordEntry[]>([]);
+  const [history, setHistory] = useState<WordEntry[]>([]);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [storyData, setStoryData] = useState<StoryResponse | null>(null);
   const [loadingStory, setLoadingStory] = useState(false);
@@ -176,11 +176,18 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem('samba_notebook');
     if (saved) setNotebook(JSON.parse(saved));
+    
+    const savedHistory = localStorage.getItem('samba_history');
+    if (savedHistory) setHistory(JSON.parse(savedHistory));
   }, []);
 
   useEffect(() => {
     localStorage.setItem('samba_notebook', JSON.stringify(notebook));
   }, [notebook]);
+
+  useEffect(() => {
+    localStorage.setItem('samba_history', JSON.stringify(history));
+  }, [history]);
 
   // Moved useEffect here to fix Hook rule violation
   useEffect(() => {
@@ -199,12 +206,28 @@ export default function App() {
     try {
       const entry = await lookupTerm(term);
       setCurrentEntry(entry);
+      
+      // Update History: Remove duplicates, add new to top, keep last 20
+      setHistory(prev => {
+        const filtered = prev.filter(h => h.term.toLowerCase() !== entry.term.toLowerCase());
+        return [entry, ...filtered].slice(0, 20);
+      });
     } catch (error) {
       console.error(error);
       alert("Something went wrong. Please check your API key or try again.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadHistoryItem = (entry: WordEntry) => {
+    setCurrentEntry(entry);
+    setSearchTerm(entry.term);
+  };
+
+  const handleClearSearch = () => {
+    setSearchTerm('');
+    setCurrentEntry(null);
   };
 
   const toggleSave = () => {
@@ -261,9 +284,17 @@ export default function App() {
             placeholder="输入单词、短语或句子..."
             className="w-full p-4 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-lg"
           />
+          {searchTerm ? (
+             <button 
+               onClick={handleClearSearch}
+               className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+             >
+               <XIcon />
+             </button>
+          ) : null}
           <button 
             onClick={() => handleSearch()} 
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className={`absolute ${searchTerm ? 'right-12' : 'right-2'} top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors`}
           >
             {loading ? <RefreshIcon /> : <SearchIcon />}
           </button>
@@ -405,12 +436,45 @@ export default function App() {
       )}
 
       {!currentEntry && !loading && (
-        <div className="flex flex-col items-center justify-center mt-32 text-center px-6 opacity-60">
-          <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-3xl mb-4">
-            <BookIcon />
+        <div className="flex flex-col items-center mt-32 px-6">
+          <div className="text-center opacity-60 mb-10">
+            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-3xl mb-4 mx-auto">
+              <BookIcon />
+            </div>
+            <h2 className="text-xl font-bold text-gray-800">Dicionário de Verbos</h2>
+            <p className="text-gray-500 mt-2 text-sm">输入单词查看详细分析</p>
           </div>
-          <h2 className="text-xl font-bold text-gray-800">SambaLingo Dictionary</h2>
-          <p className="text-gray-500 mt-2 text-sm">Type a word to see the detailed analysis.</p>
+
+          {/* Search History */}
+          {history.length > 0 && (
+            <div className="w-full max-w-sm">
+              <div className="flex justify-between items-center mb-3 px-1">
+                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                   <ClockIcon /> 最近搜索
+                 </h3>
+                 <button onClick={() => setHistory([])} className="text-gray-400 hover:text-red-500 transition-colors p-1">
+                   <TrashIcon />
+                 </button>
+              </div>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                {history.map((item) => (
+                  <div 
+                    key={item.id} 
+                    onClick={() => loadHistoryItem(item)}
+                    className="flex items-center justify-between p-3 border-b border-gray-50 last:border-0 hover:bg-blue-50 cursor-pointer transition-colors group"
+                  >
+                     <div className="min-w-0">
+                       <p className="font-bold text-gray-700 text-sm group-hover:text-blue-700">{item.term}</p>
+                       <p className="text-xs text-gray-400 truncate max-w-[200px]">{item.definition}</p>
+                     </div>
+                     <div className="text-gray-300 group-hover:text-blue-400">
+                       <ArrowRightIcon />
+                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
