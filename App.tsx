@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { lookupTerm, playTTS, generateStoryFromWords, chatAboutTerm } from './services/geminiService';
 import { WordEntry, ViewMode, ChatMessage, StoryResponse, TranslatedTerm, Conjugation, StaticVerb } from './types';
@@ -117,13 +118,13 @@ const ChatOverlay = ({ term, onClose }: { term: WordEntry, onClose: () => void }
     <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4 animate-fade-in">
       <div className="bg-white w-full max-w-md h-[80vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative">
         <div className="p-4 bg-blue-600 text-white flex justify-between items-center">
-          <h3 className="font-bold">Chatting about "{term.term}"</h3>
+          <h3 className="font-bold">Chat: {term.term}</h3>
           <button onClick={onClose}><XIcon /></button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50" ref={scrollRef}>
           <div className="bg-blue-50 p-3 rounded-lg text-sm text-gray-700">
-            Hi! I'm your Portuguese tutor. Ask me anything about <b>{term.term}</b>!
+            Hi! I'm your Portuguese tutor. Ask me anything about this!
           </div>
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -157,8 +158,13 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [currentEntry, setCurrentEntry] = useState<WordEntry | null>(null);
+  
+  // Data States
   const [notebook, setNotebook] = useState<WordEntry[]>([]);
   const [history, setHistory] = useState<WordEntry[]>([]);
+  const [storyHistory, setStoryHistory] = useState<StoryResponse[]>([]);
+  
+  // UI States
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [storyData, setStoryData] = useState<StoryResponse | null>(null);
   const [loadingStory, setLoadingStory] = useState(false);
@@ -179,6 +185,9 @@ export default function App() {
     
     const savedHistory = localStorage.getItem('samba_history');
     if (savedHistory) setHistory(JSON.parse(savedHistory));
+
+    const savedStoryHistory = localStorage.getItem('samba_story_history');
+    if (savedStoryHistory) setStoryHistory(JSON.parse(savedStoryHistory));
   }, []);
 
   useEffect(() => {
@@ -189,7 +198,10 @@ export default function App() {
     localStorage.setItem('samba_history', JSON.stringify(history));
   }, [history]);
 
-  // Moved useEffect here to fix Hook rule violation
+  useEffect(() => {
+    localStorage.setItem('samba_story_history', JSON.stringify(storyHistory));
+  }, [storyHistory]);
+
   useEffect(() => {
     setFcIndex(0);
     setFcFlipped(false);
@@ -200,14 +212,13 @@ export default function App() {
     setLoading(true);
     setStoryData(null);
     setView(ViewMode.SEARCH);
-    // If navigating from verb list, ensure we update the search box text too
     setSearchTerm(term); 
     
     try {
       const entry = await lookupTerm(term);
       setCurrentEntry(entry);
       
-      // Update History: Remove duplicates, add new to top, keep last 20
+      // Update History: Remove duplicates by term, add new to top
       setHistory(prev => {
         const filtered = prev.filter(h => h.term.toLowerCase() !== entry.term.toLowerCase());
         return [entry, ...filtered].slice(0, 20);
@@ -222,7 +233,7 @@ export default function App() {
 
   const loadHistoryItem = (entry: WordEntry) => {
     setCurrentEntry(entry);
-    setSearchTerm(entry.term);
+    setSearchTerm(entry.original_query || entry.term);
   };
 
   const handleClearSearch = () => {
@@ -250,6 +261,7 @@ export default function App() {
     try {
       const story = await generateStoryFromWords(words);
       setStoryData(story);
+      setStoryHistory(prev => [story, ...prev].slice(0, 10)); // Save to history
     } catch (e) {
       alert("Failed to generate story");
     } finally {
@@ -271,6 +283,179 @@ export default function App() {
     });
   };
 
+  const renderWordEntry = (entry: WordEntry) => (
+      <div className="bg-white p-5 space-y-6">
+        {/* Definition */}
+        <div>
+          <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-2 text-sm uppercase tracking-wide">
+            <span className="text-blue-600">□</span> 核心含义
+          </h3>
+          <p className="text-gray-700 text-lg leading-relaxed pl-6">
+            {entry.definition}
+          </p>
+        </div>
+
+        {/* Pronunciation */}
+        <div>
+          <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-2 text-sm uppercase tracking-wide">
+            <VolumeIcon /> 发音
+          </h3>
+          <div className="pl-6 flex items-center gap-4">
+            {entry.ipa && <span className="text-gray-500 font-mono text-lg">IPA: /{entry.ipa}/</span>}
+            <AudioButton text={entry.term} small />
+          </div>
+        </div>
+
+        {/* Examples */}
+        {entry.examples && (
+            <div>
+            <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">
+                <span className="text-blue-600">📝</span> 例句
+            </h3>
+            <div className="space-y-3 pl-2">
+                {entry.examples.map((ex, idx) => (
+                <div key={idx} className="bg-blue-50/50 p-3 rounded-lg border-l-4 border-blue-300">
+                    <div className="flex justify-between items-start">
+                        <p className="text-blue-900 italic font-medium">"{ex.pt}"</p>
+                        <AudioButton text={ex.pt} small />
+                    </div>
+                    <p className="text-gray-500 text-sm mt-1">({ex.cn})</p>
+                </div>
+                ))}
+            </div>
+            </div>
+        )}
+
+        {/* Synonyms Table */}
+        {entry.synonyms && entry.synonyms.length > 0 && (
+            <div>
+            <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">
+                <RefreshIcon /> 同义词对比
+            </h3>
+            <div className="border rounded-lg overflow-hidden text-sm">
+                <div className="grid grid-cols-3 bg-blue-700 text-white font-bold p-2">
+                <div className="col-span-1">同义词</div>
+                <div className="col-span-2">区别</div>
+                </div>
+                {entry.synonyms.map((syn, i) => (
+                <div key={i} className="grid grid-cols-3 border-t p-2 bg-white hover:bg-gray-50">
+                    <div className="col-span-1 font-medium text-gray-800">{syn.word}</div>
+                    <div className="col-span-2 text-gray-600">{syn.distinction}</div>
+                </div>
+                ))}
+            </div>
+            </div>
+        )}
+
+        {/* Conjugation Table */}
+        {entry.conjugations && <ConjugationSection conjugations={entry.conjugations} />}
+
+            {/* Etymology */}
+            {entry.etymology && (
+            <div>
+            <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">
+                <span className="text-lg">🏛️</span> 拉丁语词源
+            </h3>
+            <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-3 text-sm">
+                <div className="flex gap-2 items-baseline">
+                    <span className="font-serif italic text-lg text-gray-700">{entry.etymology.root}</span>
+                    <span className="text-gray-500">({entry.etymology.root_cn})</span>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                    <span className="block text-xs font-bold text-blue-600 uppercase mb-1">葡语衍生</span>
+                    <div className="flex flex-wrap gap-2">
+                        {renderDerivatives(entry.etymology.pt_derivatives, 'text-blue-700')}
+                    </div>
+                    </div>
+                    <div>
+                    <span className="block text-xs font-bold text-gray-500 uppercase mb-1">英语衍生</span>
+                    <div className="flex flex-wrap gap-2">
+                        {renderDerivatives(entry.etymology.en_derivatives, 'text-gray-700')}
+                    </div>
+                    </div>
+                </div>
+            </div>
+            </div>
+            )}
+            
+            {/* Casual/Tips */}
+            <div>
+            <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-2 text-sm uppercase tracking-wide">
+                <SparklesIcon /> 小贴士
+            </h3>
+            <div className="bg-yellow-50 text-yellow-900 p-4 rounded-xl text-sm border border-yellow-100">
+                {entry.casual_explanation}
+            </div>
+            </div>
+      </div>
+  );
+
+  const renderSentenceEntry = (entry: WordEntry) => {
+      if (!entry.sentence_analysis) return null;
+      const { translation, breakdown, grammar_notes, cultural_context } = entry.sentence_analysis;
+
+      return (
+          <div className="bg-white p-5 space-y-8">
+              {/* Translation */}
+              <div>
+                <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">
+                    <span className="text-blue-600">译</span> 中文翻译
+                </h3>
+                <div className="bg-blue-50/50 border-l-4 border-blue-500 p-4 rounded-r-lg">
+                    <p className="text-xl text-gray-800 font-medium">{translation}</p>
+                </div>
+              </div>
+
+               {/* Audio */}
+               <div className="flex items-center gap-3">
+                  <AudioButton text={entry.term} />
+                  <span className="text-sm text-gray-500">Play Sentence Audio</span>
+               </div>
+
+              {/* Word by Word Breakdown */}
+              <div>
+                <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">
+                    <span className="text-blue-600">🔍</span> 逐词解析
+                </h3>
+                <div className="flex flex-wrap gap-3">
+                    {breakdown.map((item, idx) => (
+                        <div key={idx} className="flex flex-col bg-gray-50 border border-gray-200 rounded-lg p-2 min-w-[80px] text-center">
+                            <span className="font-bold text-blue-700 text-lg mb-1">{item.word}</span>
+                            <span className="text-xs text-gray-500 uppercase tracking-tighter mb-1">{item.role}</span>
+                            <span className="text-sm text-gray-800 border-t border-gray-200 pt-1">{item.meaning}</span>
+                        </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Grammar & Culture Grid */}
+              <div className="grid md:grid-cols-2 gap-4">
+                  <div className="bg-purple-50 p-4 rounded-xl border border-purple-100">
+                      <h4 className="font-bold text-purple-900 mb-2 flex items-center gap-2">
+                          <BrainIcon /> 语法分析
+                      </h4>
+                      <p className="text-sm text-purple-800 leading-relaxed">{grammar_notes}</p>
+                  </div>
+                  <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
+                      <h4 className="font-bold text-orange-900 mb-2 flex items-center gap-2">
+                          <SparklesIcon /> 文化 & 语境
+                      </h4>
+                      <p className="text-sm text-orange-800 leading-relaxed">{cultural_context}</p>
+                  </div>
+              </div>
+
+               {/* Casual/Tips */}
+               <div>
+                <div className="bg-yellow-50 text-yellow-900 p-4 rounded-xl text-sm border border-yellow-100">
+                    <span className="font-bold mr-2">💡 Summary:</span>
+                    {entry.casual_explanation}
+                </div>
+             </div>
+          </div>
+      );
+  };
+
   const renderSearchView = () => (
     <div className="w-full max-w-md mx-auto pb-24">
       {/* Search Bar */}
@@ -281,7 +466,7 @@ export default function App() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            placeholder="输入单词、短语或句子..."
+            placeholder="输入单词、句子或中文..."
             className="w-full p-4 pr-12 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-lg"
           />
           {searchTerm ? (
@@ -313,114 +498,24 @@ export default function App() {
                     <SaveIcon filled={!!notebook.find(n => n.term === currentEntry.term)} />
                   </button>
                 </div>
-                <h1 className="text-3xl font-bold capitalize">{currentEntry.term}</h1>
+                
+                {/* Chinese Input Indication */}
+                {currentEntry.original_query && currentEntry.original_query !== currentEntry.term && (
+                    <div className="mb-2 text-blue-200 text-sm font-medium">
+                        {currentEntry.original_query} ➔
+                    </div>
+                )}
+
+                <h1 className="text-2xl sm:text-3xl font-bold">{currentEntry.term}</h1>
+                
                 {currentEntry.definition_en && (
                    <p className="text-blue-200 text-lg mt-1 font-medium">{currentEntry.definition_en}</p>
                 )}
              </div>
              
-             <div className="bg-white p-5 space-y-6">
-                {/* Definition */}
-                <div>
-                  <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-2 text-sm uppercase tracking-wide">
-                    <span className="text-blue-600">□</span> 核心含义
-                  </h3>
-                  <p className="text-gray-700 text-lg leading-relaxed pl-6">
-                    {currentEntry.definition}
-                  </p>
-                </div>
-
-                {/* Pronunciation */}
-                <div>
-                  <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-2 text-sm uppercase tracking-wide">
-                    <VolumeIcon /> 发音
-                  </h3>
-                  <div className="pl-6 flex items-center gap-4">
-                    <span className="text-gray-500 font-mono text-lg">IPA: /{currentEntry.ipa}/</span>
-                    <AudioButton text={currentEntry.term} small />
-                  </div>
-                </div>
-
-                {/* Examples */}
-                <div>
-                   <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">
-                    <span className="text-blue-600">📝</span> 例句
-                  </h3>
-                  <div className="space-y-3 pl-2">
-                    {currentEntry.examples.map((ex, idx) => (
-                      <div key={idx} className="bg-blue-50/50 p-3 rounded-lg border-l-4 border-blue-300">
-                         <div className="flex justify-between items-start">
-                            <p className="text-blue-900 italic font-medium">"{ex.pt}"</p>
-                            <AudioButton text={ex.pt} small />
-                         </div>
-                         <p className="text-gray-500 text-sm mt-1">({ex.cn})</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Synonyms Table */}
-                {currentEntry.synonyms && currentEntry.synonyms.length > 0 && (
-                  <div>
-                    <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">
-                       <RefreshIcon /> 同义词对比
-                    </h3>
-                    <div className="border rounded-lg overflow-hidden text-sm">
-                      <div className="grid grid-cols-3 bg-blue-700 text-white font-bold p-2">
-                        <div className="col-span-1">同义词</div>
-                        <div className="col-span-2">区别</div>
-                      </div>
-                      {currentEntry.synonyms.map((syn, i) => (
-                        <div key={i} className="grid grid-cols-3 border-t p-2 bg-white hover:bg-gray-50">
-                          <div className="col-span-1 font-medium text-gray-800">{syn.word}</div>
-                          <div className="col-span-2 text-gray-600">{syn.distinction}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Conjugation Table */}
-                {currentEntry.conjugations && <ConjugationSection conjugations={currentEntry.conjugations} />}
-
-                 {/* Etymology */}
-                 <div>
-                   <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-3 text-sm uppercase tracking-wide">
-                    <span className="text-lg">🏛️</span> 拉丁语词源
-                   </h3>
-                   <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-3 text-sm">
-                       <div className="flex gap-2 items-baseline">
-                          <span className="font-serif italic text-lg text-gray-700">{currentEntry.etymology.root}</span>
-                          <span className="text-gray-500">({currentEntry.etymology.root_cn})</span>
-                       </div>
-                       <div className="grid grid-cols-2 gap-4">
-                         <div>
-                            <span className="block text-xs font-bold text-blue-600 uppercase mb-1">葡语衍生</span>
-                            <div className="flex flex-wrap gap-2">
-                              {renderDerivatives(currentEntry.etymology.pt_derivatives, 'text-blue-700')}
-                            </div>
-                         </div>
-                         <div>
-                            <span className="block text-xs font-bold text-gray-500 uppercase mb-1">英语衍生</span>
-                            <div className="flex flex-wrap gap-2">
-                              {renderDerivatives(currentEntry.etymology.en_derivatives, 'text-gray-700')}
-                            </div>
-                         </div>
-                       </div>
-                   </div>
-                 </div>
-                 
-                 {/* Casual/Tips */}
-                 <div>
-                    <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-2 text-sm uppercase tracking-wide">
-                      <SparklesIcon /> 小贴士
-                    </h3>
-                    <div className="bg-yellow-50 text-yellow-900 p-4 rounded-xl text-sm border border-yellow-100">
-                       {currentEntry.casual_explanation}
-                    </div>
-                 </div>
-
-             </div>
+             {/* Render different content based on whether it's a sentence or word */}
+             {currentEntry.is_sentence ? renderSentenceEntry(currentEntry) : renderWordEntry(currentEntry)}
+             
           </div>
 
           {/* Chat Trigger */}
@@ -442,7 +537,7 @@ export default function App() {
               <BookIcon />
             </div>
             <h2 className="text-xl font-bold text-gray-800">Dicionário de Verbos</h2>
-            <p className="text-gray-500 mt-2 text-sm">输入单词查看详细分析</p>
+            <p className="text-gray-500 mt-2 text-sm">输入单词、句子或中文查看详细分析</p>
           </div>
 
           {/* Search History */}
@@ -464,8 +559,10 @@ export default function App() {
                     className="flex items-center justify-between p-3 border-b border-gray-50 last:border-0 hover:bg-blue-50 cursor-pointer transition-colors group"
                   >
                      <div className="min-w-0">
-                       <p className="font-bold text-gray-700 text-sm group-hover:text-blue-700">{item.term}</p>
-                       <p className="text-xs text-gray-400 truncate max-w-[200px]">{item.definition}</p>
+                       <p className="font-bold text-gray-700 text-sm group-hover:text-blue-700 truncate">{item.term}</p>
+                       <p className="text-xs text-gray-400 truncate max-w-[200px]">
+                           {item.is_sentence ? item.sentence_analysis?.translation : item.definition}
+                       </p>
                      </div>
                      <div className="text-gray-300 group-hover:text-blue-400">
                        <ArrowRightIcon />
@@ -502,7 +599,7 @@ export default function App() {
              onClick={() => setNotebookTab('SAVED')}
              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${notebookTab === 'SAVED' ? 'bg-white shadow text-blue-600' : 'text-gray-500'}`}
            >
-             收藏单词 ({notebook.length})
+             收藏 & 故事
            </button>
            <button 
              onClick={() => setNotebookTab('VERBS')}
@@ -544,15 +641,34 @@ export default function App() {
                      onClick={() => setStoryData(null)}
                      className="mt-3 text-xs underline text-purple-200 hover:text-white"
                    >
-                     清除
+                     关闭当前故事
                    </button>
                 </div>
               )}
             </div>
 
-            <div className="space-y-3">
+            {/* Story History List */}
+            {storyHistory.length > 0 && !storyData && (
+                <div className="space-y-2">
+                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider px-1">历史故事</h3>
+                    {storyHistory.map(story => (
+                        <div key={story.id} className="bg-white p-3 rounded-xl border border-purple-100 shadow-sm">
+                             <p className="text-sm text-gray-800 line-clamp-2 italic mb-1">"{story.pt_story}"</p>
+                             <div className="flex justify-between items-center">
+                                 <span className="text-xs text-gray-400">包含: {story.words_used?.slice(0,3).join(', ')}...</span>
+                                 <button onClick={() => setStoryData(story)} className="text-xs font-bold text-purple-600">
+                                     查看
+                                 </button>
+                             </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            <div className="space-y-3 pt-4">
+              <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider px-1">收藏列表</h3>
               {notebook.length === 0 ? (
-                <p className="text-center text-gray-400 mt-10 text-sm">暂无收藏单词</p>
+                <p className="text-center text-gray-400 mt-4 text-sm">暂无收藏单词</p>
               ) : (
                 notebook.map((entry) => (
                   <div 
@@ -562,7 +678,9 @@ export default function App() {
                   >
                     <div>
                       <span className="font-bold text-blue-700 text-lg group-hover:text-blue-600">{entry.term}</span>
-                      <span className="ml-2 text-gray-500 text-sm">{entry.definition}</span>
+                      <span className="ml-2 text-gray-500 text-sm">
+                          {entry.is_sentence ? '(句子)' : entry.definition}
+                      </span>
                     </div>
                     <ArrowRightIcon />
                   </div>
@@ -599,9 +717,6 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              {filteredVerbs.length === 0 && (
-                <p className="text-center text-gray-400 mt-4 text-sm">未找到匹配动词</p>
-              )}
             </div>
           </>
         )}
@@ -619,6 +734,14 @@ export default function App() {
     const cards = getCards();
     const currentCard = cards[fcIndex];
     const cardExamples = currentCard ? ('examples' in currentCard ? currentCard.examples : currentCard.examples) : undefined;
+    
+    // Determine translation field based on type
+    let translation = '';
+    if (currentCard) {
+        if ('cn' in currentCard) translation = currentCard.cn; // Static Verb
+        else if ('sentence_analysis' in currentCard && currentCard.sentence_analysis) translation = currentCard.sentence_analysis.translation; // Sentence
+        else if ('definition' in currentCard) translation = currentCard.definition || ''; // Word
+    }
 
     return (
       <div className="w-full max-w-md mx-auto h-[85vh] flex flex-col p-6 pb-24">
@@ -692,39 +815,29 @@ export default function App() {
                      {('term' in currentCard ? currentCard.term : currentCard.word).charAt(0).toUpperCase()}
                   </div>
                   
-                  <h1 className="text-3xl font-extrabold text-gray-800 text-center mb-4">{'term' in currentCard ? currentCard.term : currentCard.word}</h1>
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-800 text-center mb-4 line-clamp-3">
+                      {'term' in currentCard ? currentCard.term : currentCard.word}
+                  </h1>
                   <p className="text-blue-400 text-sm font-medium">点击翻转</p>
                 </div>
 
-                {/* Back */}
+                {/* Back - Simplified View */}
                 <div className="absolute w-full h-full bg-blue-600 rounded-3xl shadow-xl rotate-y-180 backface-hidden flex flex-col justify-center p-8 text-white">
                    
-                   <h3 className="text-2xl font-bold mb-2 text-center">{'definition' in currentCard ? currentCard.definition : currentCard.cn}</h3>
+                   <h3 className="text-xl sm:text-2xl font-bold mb-4 text-center line-clamp-3">
+                       {translation}
+                   </h3>
                    
-                   {'definition_en' in currentCard && <p className="text-blue-200 text-sm mb-4 text-center">{currentCard.definition_en}</p>}
+                   {/* Simplified content: No Etymology, No Conjugation on Back Card */}
                    
-                   {/* Unified Examples Rendering */}
                    {cardExamples && cardExamples.length > 0 && (
-                     <>
-                       <div className="w-full h-px bg-white/20 my-4"></div>
+                     <div className="overflow-y-auto max-h-[120px] no-scrollbar">
+                       <div className="w-full h-px bg-white/20 mb-3"></div>
                        
                        <div className="mb-2 text-center">
-                         <p className="font-medium text-lg mt-1 leading-snug">"{cardExamples[0].pt}"</p>
+                         <p className="font-medium text-lg leading-snug">"{cardExamples[0].pt}"</p>
                          <p className="text-sm text-blue-100 mt-1 opacity-80">{cardExamples[0].cn}</p>
                        </div>
-                       
-                       {cardExamples[1] && (
-                         <div className="mb-2 text-center mt-2 hidden sm:block">
-                           <p className="font-medium text-lg mt-1 leading-snug">"{cardExamples[1].pt}"</p>
-                           <p className="text-sm text-blue-100 mt-1 opacity-80">{cardExamples[1].cn}</p>
-                         </div>
-                       )}
-                     </>
-                   )}
-
-                   {fcSource === 'VERBS' && (
-                     <div className="text-center mt-4">
-                        <p className="text-sm text-blue-200 italic">点击喇叭听发音</p>
                      </div>
                    )}
 

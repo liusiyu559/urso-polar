@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, Modality } from "@google/genai";
 import { WordEntry, StoryResponse } from "../types";
 
@@ -39,11 +40,15 @@ export const playTTS = async (text: string) => {
 
   try {
     const ai = getAI();
+    // Using generateContent with specific TTS model and array structure
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
-      contents: {
-        parts: [{ text: text.trim() }],
-      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: text.trim() }],
+        }
+      ],
       config: {
         responseModalities: [Modality.AUDIO], 
         speechConfig: {
@@ -57,9 +62,6 @@ export const playTTS = async (text: string) => {
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     
     if (!base64Audio) {
-        const returnedText = response.candidates?.[0]?.content?.parts?.[0]?.text;
-        console.error("TTS Response missing audio data. Returned text:", returnedText);
-        console.debug("Full Response:", JSON.stringify(response, null, 2));
         throw new Error("No audio data received from API");
     }
 
@@ -82,32 +84,42 @@ export const lookupTerm = async (term: string): Promise<WordEntry> => {
   const ai = getAI();
   
   const prompt = `
-    User Input: "${term}" (Brazilian Portuguese).
+    User Input: "${term}"
     Target Audience: Simplified Chinese native speaker learning Portuguese.
     
-    Task: Create a comprehensive dictionary entry.
-    
-    Requirements:
-    1. Definition: Natural language explanation in Simplified Chinese (Core Meaning).
-    2. Definition_EN: Natural language explanation in English (Brief).
-    3. IPA: International Phonetic Alphabet representation.
-    4. Examples: 2 sentences in Portuguese with Chinese translation.
-    5. Synonyms: List 3 related words or synonyms and briefly explain the distinction/nuance in Chinese.
-    6. Etymology: Identify Latin root (provide root and its Chinese meaning), list Portuguese derivatives (up to 3, with Chinese meaning) and English derivatives (up to 3, with Chinese meaning).
-    7. Casual Explanation: A short, fun, "Tip" style paragraph (in Chinese). Mention cultural context, usage tone, or memory hooks.
-    
-    IMPORTANT - VERB LOGIC:
-    If the input term is a verb, or contains a main verb:
-    Provide conjugations for these tenses: 
-    - Presente do Indicativo (Present)
-    - Pretérito Perfeito (Past Perfect)
-    - Pretérito Imperfeito (Imperfect)
-    - Imperativo (Imperative - use Affirmative)
-    - Presente do Subjuntivo (Subjunctive Present)
-    - Futuro do Presente (Simple Future)
-    
-    For each tense, provide the forms for: eu, tu, ele/você, nós, vós, eles/vocês.
-    If it is NOT a verb, leave the 'conjugations' field empty array.
+    Task: Analyze the input and create a learning entry.
+
+    LOGIC FLOW:
+    1. **Language Detection**: 
+       - If the user input is in CHINESE (e.g., "你好", "房子", "我爱吃面包"), translate it to the most common/natural BRAZILIAN PORTUGUESE equivalent first. 
+       - Use that Portuguese translation as the "term" for the entry.
+       - If input is already Portuguese, use it directly as "term".
+
+    2. **Type Detection**:
+       - Is the "term" a single word/short phrase OR a full sentence?
+       - Set "is_sentence" to true or false.
+
+    3. **OUTPUT REQUIREMENTS (If Word/Phrase)**:
+       - definition: Chinese explanation.
+       - definition_en: English explanation.
+       - ipa: IPA pronunciation.
+       - examples: 2 sentences (PT + CN).
+       - synonyms: 3 related words with distinctions.
+       - etymology: Latin root + PT/EN derivatives.
+       - casual_explanation: Fun tip/culture.
+       - conjugations: If it's a verb, provide tenses (Present, Past Perf, Imperfect, Imperative, Subj Pres, Future). Else empty.
+       - sentence_analysis: null.
+
+    4. **OUTPUT REQUIREMENTS (If Sentence)**:
+       - term: The full Portuguese sentence.
+       - definition: null.
+       - ipa: null.
+       - sentence_analysis: 
+         - translation: Natural Chinese translation.
+         - breakdown: Array of {word, meaning, role} for every word in the sentence.
+         - grammar_notes: Explain the grammar structure, verb tenses used, etc.
+         - cultural_context: Any cultural nuance, tone (formal/informal), or when to use this.
+       - casual_explanation: Brief summary of the vibe.
   `;
 
   const response = await ai.models.generateContent({
@@ -118,11 +130,16 @@ export const lookupTerm = async (term: string): Promise<WordEntry> => {
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          definition: { type: Type.STRING },
-          definition_en: { type: Type.STRING },
-          ipa: { type: Type.STRING },
+          term: { type: Type.STRING, description: "The Portuguese term or sentence (translated from Chinese if necessary)" },
+          is_sentence: { type: Type.BOOLEAN },
+          
+          // Word Fields
+          definition: { type: Type.STRING, nullable: true },
+          definition_en: { type: Type.STRING, nullable: true },
+          ipa: { type: Type.STRING, nullable: true },
           examples: {
             type: Type.ARRAY,
+            nullable: true,
             items: {
               type: Type.OBJECT,
               properties: {
@@ -133,6 +150,7 @@ export const lookupTerm = async (term: string): Promise<WordEntry> => {
           },
           synonyms: {
             type: Type.ARRAY,
+            nullable: true,
             items: {
               type: Type.OBJECT,
               properties: {
@@ -143,6 +161,7 @@ export const lookupTerm = async (term: string): Promise<WordEntry> => {
           },
           conjugations: {
             type: Type.ARRAY,
+            nullable: true,
             items: {
               type: Type.OBJECT,
               properties: {
@@ -163,31 +182,43 @@ export const lookupTerm = async (term: string): Promise<WordEntry> => {
           },
           etymology: {
             type: Type.OBJECT,
+            nullable: true,
             properties: {
               root: { type: Type.STRING },
               root_cn: { type: Type.STRING },
               pt_derivatives: { 
                 type: Type.ARRAY, 
-                items: { 
-                  type: Type.OBJECT,
-                  properties: {
-                    word: { type: Type.STRING },
-                    cn: { type: Type.STRING }
-                  }
-                } 
+                items: { type: Type.OBJECT, properties: { word: { type: Type.STRING }, cn: { type: Type.STRING } } } 
               },
               en_derivatives: { 
                 type: Type.ARRAY, 
-                items: { 
-                  type: Type.OBJECT,
-                  properties: {
-                    word: { type: Type.STRING },
-                    cn: { type: Type.STRING }
-                  }
-                } 
+                items: { type: Type.OBJECT, properties: { word: { type: Type.STRING }, cn: { type: Type.STRING } } } 
               },
             },
           },
+
+          // Sentence Fields
+          sentence_analysis: {
+            type: Type.OBJECT,
+            nullable: true,
+            properties: {
+                translation: { type: Type.STRING },
+                breakdown: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            word: { type: Type.STRING },
+                            meaning: { type: Type.STRING },
+                            role: { type: Type.STRING }
+                        }
+                    }
+                },
+                grammar_notes: { type: Type.STRING },
+                cultural_context: { type: Type.STRING }
+            }
+          },
+
           casual_explanation: { type: Type.STRING },
         },
       },
@@ -201,7 +232,7 @@ export const lookupTerm = async (term: string): Promise<WordEntry> => {
   
   return {
     id: Date.now().toString(),
-    term,
+    original_query: term, // Save what the user actually typed
     timestamp: Date.now(),
     ...data
   };
@@ -231,21 +262,40 @@ export const generateStoryFromWords = async (words: string[]): Promise<StoryResp
   });
 
   const text = response.text;
-  return JSON.parse(text || "{}");
+  const data = JSON.parse(text || "{}");
+  
+  return {
+    id: Date.now().toString(),
+    timestamp: Date.now(),
+    words_used: words,
+    ...data
+  };
 };
 
 // --- Chat ---
 export const chatAboutTerm = async (history: any[], message: string, currentTerm: WordEntry) => {
   const ai = getAI();
   
+  let context = "";
+  if (currentTerm.is_sentence && currentTerm.sentence_analysis) {
+      context = `
+        Sentence: "${currentTerm.term}"
+        Translation: ${currentTerm.sentence_analysis.translation}
+        Grammar: ${currentTerm.sentence_analysis.grammar_notes}
+      `;
+  } else {
+      context = `
+        Word: "${currentTerm.term}"
+        Definition: ${currentTerm.definition}
+      `;
+  }
+
   // Prepend system instruction context about the current term if it's the start
   const systemInstruction = `
-    You are a helpful Portuguese tutor. The user is currently looking at the dictionary entry for: "${currentTerm.term}".
-    Definition (CN): ${currentTerm.definition}.
-    Definition (EN): ${currentTerm.definition_en}.
-    Casual note: ${currentTerm.casual_explanation}.
+    You are a helpful Portuguese tutor. The user is currently looking at: 
+    ${context}
     
-    Answer the user's questions specifically about this word/phrase. Keep answers concise, friendly, and encourage learning.
+    Answer the user's questions specifically about this. Keep answers concise, friendly, and encourage learning.
   `;
 
   const chat = ai.chats.create({

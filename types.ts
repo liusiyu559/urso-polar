@@ -40,16 +40,38 @@ export interface Conjugation {
   };
 }
 
+// New Interface for Sentence Analysis
+export interface SentenceBreakdown {
+  word: string;
+  meaning: string;
+  role: string; // e.g., Noun, Verb, Preposition
+}
+
+export interface SentenceAnalysis {
+  translation: string;
+  breakdown: SentenceBreakdown[];
+  grammar_notes: string;
+  cultural_context: string;
+}
+
 export interface WordEntry {
   id: string;
-  term: string;
-  definition: string; // Chinese natural language explanation
-  definition_en: string; // English natural language explanation
-  ipa: string; // IPA pronunciation
-  examples: Example[];
-  synonyms: Synonym[]; 
-  etymology: Etymology;
-  conjugations?: Conjugation[]; // Optional: only for verbs
+  term: string; // The Portuguese term/sentence
+  original_query?: string; // What the user actually typed (e.g., if they typed in Chinese)
+  is_sentence: boolean;
+  
+  // Word specific fields (optional if it's a sentence)
+  definition?: string; 
+  definition_en?: string; 
+  ipa?: string; 
+  examples?: Example[];
+  synonyms?: Synonym[]; 
+  etymology?: Etymology;
+  conjugations?: Conjugation[]; 
+  
+  // Sentence specific fields (optional if it's a word)
+  sentence_analysis?: SentenceAnalysis;
+
   casual_explanation: string; 
   timestamp: number;
 }
@@ -60,6 +82,9 @@ export interface ChatMessage {
 }
 
 export interface StoryResponse {
+  id: string; // Added ID for history
+  timestamp: number; // Added timestamp
+  words_used: string[]; // Track which words generated this
   pt_story: string;
   cn_translation: string;
 }
@@ -69,7 +94,6 @@ export interface FlashcardState {
   isFlipped: boolean;
 }
 
-// For the static verb list
 export interface StaticVerb {
   word: string;
   cn: string;
